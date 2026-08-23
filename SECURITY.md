@@ -20,5 +20,8 @@ The five source repositories audited for this integration included committed `.e
 - External research is explicitly treated as untrusted data.
 - No booking, payment, email, or account action is performed automatically.
 - Human approval is required before a plan is treated as final.
+- Approved plans are owner-scoped with a one-way SHA-256 identity key; email addresses are not written to the plan table.
+- SQL operations use prepared statements, and database constraints independently enforce traveler, budget, currency, mode, and revision invariants.
+- Full plan snapshots pass cross-field server validation before storage and again when restored.
 
 Report a vulnerability privately to the repository owner. Do not open a public issue containing a key, exploit payload, or personal travel data.

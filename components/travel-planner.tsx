@@ -1,12 +1,22 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 
 import { money } from "@/lib/fallback-plan";
-import type { PlannerRequest, TravelPlan } from "@/lib/types";
+import type { PlannerRequest, SavedPlanSummary, TravelPlan } from "@/lib/types";
 
 const INTERESTS = ["Food", "Culture", "Nature", "History", "Shopping", "Nightlife", "Wellness", "Adventure"];
+const AGENT_RUN_STEPS = [
+  ["Supervisor", "Validating constraints and routing the request"],
+  ["Flight agent", "Checking route and airport context"],
+  ["Stay agent", "Researching areas and accommodation trade-offs"],
+  ["Weather agent", "Checking the forecast window and packing needs"],
+  ["Budget agent", "Reconciling every allocation with your total"],
+  ["Itinerary agent", "Composing the reviewed day-by-day draft"],
+] as const;
+
+type Operation = "planning" | "revising" | "saving" | "opening" | "deleting" | null;
 
 function isoDate(offsetDays: number) {
   const date = new Date();
@@ -56,15 +66,19 @@ function planToMarkdown(plan: TravelPlan) {
   return lines.join("\n");
 }
 
-async function postJson<T>(url: string, body: unknown): Promise<T> {
+async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
+    ...init,
+    headers: { "content-type": "application/json", ...init?.headers },
   });
+  if (response.status === 204) return undefined as T;
   const payload = await response.json() as T & { error?: string };
   if (!response.ok) throw new Error(payload.error || "Request failed.");
   return payload;
+}
+
+function postJson<T>(url: string, body: unknown): Promise<T> {
+  return requestJson<T>(url, { method: "POST", body: JSON.stringify(body) });
 }
 
 function ModeBadge({ mode }: { mode: TravelPlan["mode"] }) {
@@ -73,6 +87,86 @@ function ModeBadge({ mode }: { mode: TravelPlan["mode"] }) {
       <span className="status-dot" />
       {mode === "live" ? "AI + live research" : "Safe preview mode"}
     </span>
+  );
+}
+
+function AgentRunPanel({ operation }: { operation: Exclude<Operation, null> }) {
+  const [activeStep, setActiveStep] = useState(0);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setActiveStep((current) => Math.min(current + 1, AGENT_RUN_STEPS.length - 1));
+    }, operation === "revising" ? 520 : 680);
+    return () => window.clearInterval(timer);
+  }, [operation]);
+
+  return (
+    <section className="agent-run-panel" aria-live="polite" aria-label="Live agent execution">
+      <div className="agent-run-heading">
+        <div><p className="eyebrow">Live workflow</p><h2>{operation === "revising" ? "Agents are revising your draft" : "Six agents are building your trip"}</h2></div>
+        <span>{Math.round((activeStep + 1) / AGENT_RUN_STEPS.length * 100)}%</span>
+      </div>
+      <div className="agent-run-progress"><span style={{ width: `${(activeStep + 1) / AGENT_RUN_STEPS.length * 100}%` }} /></div>
+      <div className="agent-run-grid">
+        {AGENT_RUN_STEPS.map(([label, detail], index) => {
+          const status = index < activeStep ? "complete" : index === activeStep ? "running" : "queued";
+          return (
+            <div className={`agent-run-step ${status}`} key={label}>
+              <span>{status === "complete" ? "✓" : String(index + 1).padStart(2, "0")}</span>
+              <div><strong>{label}</strong><small>{detail}</small></div>
+              {status === "running" && <i aria-hidden="true" />}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function SavedPlansPanel({
+  plans,
+  loading,
+  error,
+  busy,
+  onOpen,
+  onDelete,
+}: {
+  plans: SavedPlanSummary[];
+  loading: boolean;
+  error: string;
+  busy: boolean;
+  onOpen: (id: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  return (
+    <section className="saved-plans-section" id="saved" data-reveal>
+      <div className="saved-plans-heading">
+        <div><p className="eyebrow">Validated database history</p><h2>Your approved trips stay available.</h2></div>
+        <span className={`database-badge ${error ? "error" : ""}`}><i /> {loading ? "Checking hosted SQL" : error ? "Database unavailable" : "Hosted SQL connected"}</span>
+      </div>
+      {loading ? (
+        <div className="saved-empty"><span className="spinner dark" /> Loading approved plans…</div>
+      ) : error ? (
+        <div className="saved-empty error" role="status">{error}</div>
+      ) : plans.length === 0 ? (
+        <div className="saved-empty">Approve your first plan and it will appear here after server validation.</div>
+      ) : (
+        <div className="saved-plans-grid">
+          {plans.map((saved, index) => (
+            <article className="saved-plan-card" key={saved.id} style={{ animationDelay: `${index * 70}ms` }}>
+              <div className="saved-card-top"><span>{saved.mode === "live" ? "Live research" : "Preview"}</span><small>{saved.startDate}</small></div>
+              <h3>{saved.origin} <em>→</em> {saved.destination}</h3>
+              <p>{saved.startDate} – {saved.endDate} · {saved.travelers} traveler{saved.travelers === 1 ? "" : "s"}</p>
+              <strong>{money(saved.budget, saved.currency)}</strong>
+              <div className="saved-card-actions">
+                <button className="quiet-button" onClick={() => onOpen(saved.id)} disabled={busy}>Open plan</button>
+                <button className="text-button danger" onClick={() => onDelete(saved.id)} disabled={busy} aria-label={`Delete ${saved.destination} plan`}>Delete</button>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -85,6 +179,7 @@ function PlanResult({
   onApprove,
   onRevise,
   onReset,
+  saveStatus,
 }: {
   plan: TravelPlan;
   approved: boolean;
@@ -94,7 +189,11 @@ function PlanResult({
   onApprove: () => void;
   onRevise: () => void;
   onReset: () => void;
+  saveStatus: string;
 }) {
+  const [activeDay, setActiveDay] = useState(plan.itinerary[0]?.day ?? 1);
+  const focusedDay = plan.itinerary.find((day) => day.day === activeDay) ?? plan.itinerary[0];
+
   const download = () => {
     const blob = new Blob([planToMarkdown(plan)], { type: "text/markdown;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -106,7 +205,7 @@ function PlanResult({
   };
 
   return (
-    <section className="result-shell" aria-labelledby="plan-heading">
+    <section className="result-shell" aria-labelledby="plan-heading" data-reveal>
       <div className="result-heading">
         <div>
           <p className="eyebrow">Your draft is ready</p>
@@ -129,7 +228,7 @@ function PlanResult({
 
       <div className="agent-strip" aria-label="Agent workflow">
         {plan.agents.map((agent, index) => (
-          <div className={`agent-step ${agent.status}`} key={agent.id}>
+          <div className={`agent-step ${agent.status}`} key={agent.id} style={{ animationDelay: `${index * 85}ms` }}>
             <span className="agent-index">{String(index + 1).padStart(2, "0")}</span>
             <div><strong>{agent.label}</strong><small>{agent.detail}</small></div>
           </div>
@@ -137,7 +236,7 @@ function PlanResult({
       </div>
 
       <div className="insight-grid">
-        <article className="insight-card flight-card">
+        <article className="insight-card flight-card" data-reveal>
           <div className="card-kicker"><span>✦</span> Flight guidance</div>
           <h3>{plan.flight.route}</h3>
           <p className="big-stat">{plan.flight.fareRange}</p>
@@ -147,7 +246,7 @@ function PlanResult({
           <small>{plan.flight.sourceLabel}</small>
         </article>
 
-        <article className="insight-card stay-card">
+        <article className="insight-card stay-card" data-reveal>
           <div className="card-kicker"><span>⌂</span> Where to stay</div>
           <h3>{plan.stay.nightlyRange} / night</h3>
           <div className="stack-list">
@@ -158,7 +257,7 @@ function PlanResult({
           <small>{plan.stay.sourceLabel}</small>
         </article>
 
-        <article className="insight-card weather-card">
+        <article className="insight-card weather-card" data-reveal>
           <div className="card-kicker"><span>☼</span> Weather window</div>
           <p className="big-stat">{plan.weather.temperatureRange}</p>
           <p>{plan.weather.summary}</p>
@@ -173,21 +272,32 @@ function PlanResult({
             <div><p className="eyebrow">Itinerary agent</p><h3>Day-by-day rhythm</h3></div>
             <span>{plan.itinerary.length} days</span>
           </div>
-          <div className="timeline">
+          <div className="day-tabs" role="tablist" aria-label="Itinerary days">
             {plan.itinerary.map((day) => (
-              <div className="timeline-day" key={day.day}>
-                <div className="day-marker"><span>{day.day}</span></div>
-                <div className="day-content">
-                  <div className="day-title"><h4>{day.title}</h4><span>{money(day.estimatedCost, plan.budget.currency)}</span></div>
-                  <dl>
-                    <div><dt>Morning</dt><dd>{day.morning}</dd></div>
-                    <div><dt>Afternoon</dt><dd>{day.afternoon}</dd></div>
-                    <div><dt>Evening</dt><dd>{day.evening}</dd></div>
-                  </dl>
-                </div>
-              </div>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeDay === day.day}
+                className={activeDay === day.day ? "active" : ""}
+                onClick={() => setActiveDay(day.day)}
+                key={day.day}
+              >Day {day.day}</button>
             ))}
           </div>
+          {focusedDay && (
+            <div className="day-focus-card" role="tabpanel" key={`${plan.id}-${focusedDay.day}`}>
+              <div className="day-focus-heading">
+                <span>{String(focusedDay.day).padStart(2, "0")}</span>
+                <div><small>Selected itinerary day</small><h4>{focusedDay.title}</h4></div>
+                <strong>{money(focusedDay.estimatedCost, plan.budget.currency)}</strong>
+              </div>
+              <dl>
+                <div><dt>Morning</dt><dd>{focusedDay.morning}</dd></div>
+                <div><dt>Afternoon</dt><dd>{focusedDay.afternoon}</dd></div>
+                <div><dt>Evening</dt><dd>{focusedDay.evening}</dd></div>
+              </dl>
+            </div>
+          )}
         </article>
 
         <aside className="budget-panel">
@@ -212,7 +322,7 @@ function PlanResult({
           <p className="eyebrow">Human in the loop</p>
           <h3>{approved ? "Plan approved" : "Review before you act"}</h3>
           <p>{approved
-            ? "Your approved draft is ready to download. Prices and availability still need a final check before payment."
+            ? "Server validation passed and this approved draft is saved in the hosted database. Prices and availability still need a final check before payment."
             : "Nothing is booked automatically. Approve the draft or tell the itinerary agent exactly what to change."}</p>
         </div>
         {!approved && (
@@ -228,10 +338,11 @@ function PlanResult({
               <button className="quiet-button" onClick={onRevise} disabled={busy || feedback.trim().length < 3}>
                 {busy ? "Replanning…" : "Request revision"}
               </button>
-              <button className="primary-button compact" onClick={onApprove}>Approve draft</button>
+              <button className="primary-button compact" onClick={onApprove} disabled={busy}>{busy ? "Saving securely…" : "Approve & save"}</button>
             </div>
           </div>
         )}
+        {saveStatus && <p className="save-status" role="status">{saveStatus}</p>}
       </section>
 
       <details className="source-drawer">
@@ -250,10 +361,39 @@ function PlanResult({
 export default function TravelPlanner() {
   const [request, setRequest] = useState<PlannerRequest>(DEFAULT_REQUEST);
   const [plan, setPlan] = useState<TravelPlan | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [operation, setOperation] = useState<Operation>(null);
   const [error, setError] = useState("");
   const [feedback, setFeedback] = useState("");
   const [approved, setApproved] = useState(false);
+  const [saveStatus, setSaveStatus] = useState("");
+  const [savedPlans, setSavedPlans] = useState<SavedPlanSummary[]>([]);
+  const [savedPlansLoading, setSavedPlansLoading] = useState(true);
+  const [savedPlansError, setSavedPlansError] = useState("");
+  const busy = operation !== null;
+
+  const refreshSavedPlans = async () => {
+    setSavedPlansLoading(true);
+    setSavedPlansError("");
+    try {
+      const payload = await requestJson<{ plans: SavedPlanSummary[] }>("/api/plans?limit=8");
+      setSavedPlans(payload.plans);
+    } catch (caught) {
+      setSavedPlansError(caught instanceof Error ? caught.message : "Saved plans could not be loaded.");
+    } finally {
+      setSavedPlansLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    let active = true;
+    requestJson<{ plans: SavedPlanSummary[] }>("/api/plans?limit=8")
+      .then((payload) => { if (active) setSavedPlans(payload.plans); })
+      .catch((caught) => {
+        if (active) setSavedPlansError(caught instanceof Error ? caught.message : "Saved plans could not be loaded.");
+      })
+      .finally(() => { if (active) setSavedPlansLoading(false); });
+    return () => { active = false; };
+  }, []);
 
   const duration = useMemo(() => {
     const start = Date.parse(`${request.startDate}T00:00:00Z`);
@@ -274,9 +414,10 @@ export default function TravelPlanner() {
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    setBusy(true);
+    setOperation("planning");
     setError("");
     setApproved(false);
+    setSaveStatus("");
     try {
       const payload = await postJson<{ plan: TravelPlan }>("/api/plan", request);
       setPlan(payload.plan);
@@ -284,14 +425,16 @@ export default function TravelPlanner() {
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The planner could not start.");
     } finally {
-      setBusy(false);
+      setOperation(null);
     }
   };
 
   const revise = async () => {
     if (!plan) return;
-    setBusy(true);
+    setOperation("revising");
     setError("");
+    setApproved(false);
+    setSaveStatus("");
     try {
       const payload = await postJson<{ plan: TravelPlan }>("/api/revise", { plan, feedback });
       setPlan(payload.plan);
@@ -299,14 +442,58 @@ export default function TravelPlanner() {
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The revision could not be completed.");
     } finally {
-      setBusy(false);
+      setOperation(null);
     }
   };
 
-  const approve = () => {
+  const approve = async () => {
     if (!plan) return;
-    setApproved(true);
-    try { window.localStorage.setItem("approved-travel-plan", JSON.stringify(plan)); } catch { /* storage is optional */ }
+    setOperation("saving");
+    setError("");
+    setSaveStatus("");
+    try {
+      const payload = await postJson<{ saved: SavedPlanSummary }>("/api/plans", { plan });
+      setApproved(true);
+      setSaveStatus(`Validated and saved: ${payload.saved.destination} is now in your approved trip history.`);
+      await refreshSavedPlans();
+    } catch (caught) {
+      setApproved(false);
+      setSaveStatus("");
+      setError(caught instanceof Error ? caught.message : "The plan could not be saved.");
+    } finally {
+      setOperation(null);
+    }
+  };
+
+  const openSavedPlan = async (id: string) => {
+    setOperation("opening");
+    setError("");
+    try {
+      const payload = await requestJson<{ plan: TravelPlan }>(`/api/plans/${encodeURIComponent(id)}`);
+      setPlan(payload.plan);
+      setRequest(payload.plan.request);
+      setApproved(true);
+      setSaveStatus("Loaded from the validated plan database.");
+      window.setTimeout(() => document.getElementById("plan-heading")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The saved plan could not be opened.");
+    } finally {
+      setOperation(null);
+    }
+  };
+
+  const deleteSavedPlan = async (id: string) => {
+    setOperation("deleting");
+    setSavedPlansError("");
+    try {
+      await requestJson<void>(`/api/plans/${encodeURIComponent(id)}`, { method: "DELETE" });
+      setSavedPlans((current) => current.filter((saved) => saved.id !== id));
+      if (plan?.id === id) reset();
+    } catch (caught) {
+      setSavedPlansError(caught instanceof Error ? caught.message : "The saved plan could not be deleted.");
+    } finally {
+      setOperation(null);
+    }
   };
 
   const reset = () => {
@@ -314,6 +501,7 @@ export default function TravelPlanner() {
     setApproved(false);
     setFeedback("");
     setError("");
+    setSaveStatus("");
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -327,13 +515,14 @@ export default function TravelPlanner() {
         <nav aria-label="Primary navigation">
           <a href="#planner">Planner</a>
           <a href="#workflow">How it works</a>
+          <a href="#saved">Saved trips</a>
           <a href="https://github.com/AnshMadanpuriya/AI-Travel-Planning-System-using-LangGraph" target="_blank" rel="noreferrer">GitHub ↗</a>
         </nav>
       </header>
 
       <main id="top">
         <section className="hero" id="planner">
-          <div className="hero-copy">
+          <div className="hero-copy" data-reveal>
             <div className="eyebrow-row"><span className="eyebrow">Multi-agent trip planning</span><span className="mini-pill">Review before action</span></div>
             <h1>A travel plan that <em>shows its work.</em></h1>
             <p className="hero-lede">Six specialist agents research, budget, and shape your trip. You inspect the draft, request changes, and approve the final plan—nothing gets booked behind your back.</p>
@@ -341,7 +530,7 @@ export default function TravelPlanner() {
             <form className="planner-form" onSubmit={submit}>
               <div className="route-row">
                 <label><span>From</span><input value={request.origin} onChange={(event) => setField("origin", event.target.value)} placeholder="Indore" required /></label>
-                <span className="route-arrow" aria-hidden="true">→</span>
+                <span className={`route-arrow ${operation === "planning" ? "is-flying" : ""}`} aria-hidden="true">✈</span>
                 <label><span>To</span><input value={request.destination} onChange={(event) => setField("destination", event.target.value)} placeholder="Tokyo" required /></label>
               </div>
 
@@ -365,13 +554,12 @@ export default function TravelPlanner() {
 
               <div className="submit-row">
                 <div><strong>Ready in one draft</strong><span>Live providers are used only when server-side keys are configured.</span></div>
-                <button className="primary-button" type="submit" disabled={busy}>{busy ? <><span className="spinner" /> Agents are planning…</> : <>Build my trip <span>↗</span></>}</button>
+                <button className="primary-button" type="submit" disabled={busy}>{operation === "planning" ? <><span className="spinner" /> Agents are planning…</> : <>Build my trip <span>↗</span></>}</button>
               </div>
-              {error && <p className="form-error" role="alert">{error}</p>}
             </form>
           </div>
 
-          <aside className="hero-visual" aria-label="Example destination">
+          <aside className="hero-visual" aria-label="Example destination" data-reveal>
             <Image
               src="https://images.unsplash.com/photo-1686931265920-bc6c061da8a2?auto=format&fit=crop&w=1200&q=82"
               alt="Chureito Pagoda with Mount Fuji in the background"
@@ -391,23 +579,38 @@ export default function TravelPlanner() {
           </aside>
         </section>
 
-        <section className="workflow-section" id="workflow">
+        <section className="workflow-section" id="workflow" data-reveal>
           <div><p className="eyebrow">One request, coordinated expertise</p><h2>The supervisor sends each detail to the right agent.</h2></div>
           <div className="workflow-list">
             {["Guardrail & routing", "Flights & stays", "Weather & budget", "Itinerary & approval"].map((label, index) => <div key={label}><span>{String(index + 1).padStart(2, "0")}</span><strong>{label}</strong></div>)}
           </div>
         </section>
 
+        {(operation === "planning" || operation === "revising") && <AgentRunPanel key={operation} operation={operation} />}
+
+        <SavedPlansPanel
+          plans={savedPlans}
+          loading={savedPlansLoading}
+          error={savedPlansError}
+          busy={busy}
+          onOpen={(id) => void openSavedPlan(id)}
+          onDelete={(id) => void deleteSavedPlan(id)}
+        />
+
+        {error && <p className="global-error" role="alert">{error}</p>}
+
         {plan && (
           <PlanResult
+            key={plan.id}
             plan={plan}
             approved={approved}
             feedback={feedback}
             busy={busy}
             onFeedback={setFeedback}
-            onApprove={approve}
+            onApprove={() => void approve()}
             onRevise={revise}
             onReset={reset}
+            saveStatus={saveStatus}
           />
         )}
       </main>

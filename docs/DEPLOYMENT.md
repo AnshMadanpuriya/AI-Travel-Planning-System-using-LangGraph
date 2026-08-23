@@ -11,6 +11,10 @@ Current production deployment: [AI Travel Agent System](https://ai-travel-agent-
 - `POST /api/plan`
 - `POST /api/revise`
 - `GET /api/health`
+- `GET|POST /api/plans`
+- `GET|DELETE /api/plans/:id`
+
+Approved plans are stored in the platform-managed D1 database bound as `DB`. The generated migration under `drizzle/` creates constrained plan records and owner-scoped indexes. The hosting manifest declares only the logical binding; the deployment platform owns the physical database.
 
 Set runtime environment variables in the hosting provider's secret manager. Never upload a local `.env` file.
 
@@ -54,12 +58,14 @@ For a VPS, place the repository under `/opt/ai-travel-agent`, restrict `.env` to
 ## Post-deployment verification
 
 1. Open `/api/health`; expect HTTP 200 and `status: ok`.
-2. Create a 3–7 day trip and confirm six workflow steps are displayed.
-3. Confirm preview/live mode is visibly labeled.
-4. Request a revision and verify the new draft reflects the feedback.
-5. Approve the draft and download the Markdown plan.
-6. Test an invalid date range and a prompt/credential extraction request; both should return a safe validation error.
-7. Confirm no API key appears in browser source, network response bodies, logs, or the repository.
+2. Confirm `persistence.database` is `true`.
+3. Create a 3–7 day trip and confirm all six workflow stages are displayed.
+4. Confirm preview/live mode is visibly labeled.
+5. Request a revision and verify the new draft reflects the feedback.
+6. Approve the draft, refresh the page, and restore it from Saved trips.
+7. Delete the saved draft and confirm it disappears from the history.
+8. Test an invalid date range and a prompt/credential extraction request; both should return a safe validation error.
+9. Confirm no API key appears in browser source, network response bodies, logs, or the repository.
 
 ## Rollback
 

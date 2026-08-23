@@ -96,3 +96,18 @@ export type ResearchBundle = {
   warnings: string[];
   sources: Array<{ label: string; url: string }>;
 };
+
+export type SavedPlanSummary = {
+  id: string;
+  origin: string;
+  destination: string;
+  startDate: string;
+  endDate: string;
+  travelers: number;
+  budget: number;
+  currency: Currency;
+  mode: TravelPlan["mode"];
+  revisionCount: number;
+  approvedAt: string;
+  updatedAt: string;
+};

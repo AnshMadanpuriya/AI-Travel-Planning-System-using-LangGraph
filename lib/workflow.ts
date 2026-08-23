@@ -270,35 +270,69 @@ function supervisorNode(state: WorkflowStateType) {
   };
 }
 
-async function researchNode(state: WorkflowStateType) {
+function mergeResearch(
+  current: ResearchBundle,
+  update: Partial<ResearchBundle>,
+  warning?: string,
+  sources: Array<{ label: string; url: string }> = [],
+): ResearchBundle {
+  return {
+    ...current,
+    ...update,
+    warnings: [...current.warnings, ...(warning ? [warning] : [])],
+    sources: [...current.sources, ...sources],
+  };
+}
+
+async function flightAgentNode(state: WorkflowStateType) {
   if (process.env.TRAVEL_AGENT_DEMO_MODE === "true") {
     return {
-      research: {
-        ...emptyResearch(),
-        warnings: ["This deployment is running in safe preview mode. Add runtime API keys to enable AI and provider research."],
-      },
+      research: mergeResearch(
+        state.research,
+        { airports: [], airlines: [] },
+        "This deployment is running in safe preview mode. Add runtime API keys to enable AI and provider research.",
+      ),
     };
   }
-
-  const [weather, flights, hotels] = await Promise.all([
-    researchWeather(state.request),
-    researchFlights(state.request),
-    researchHotels(state.request),
-  ]);
-  const warnings = [weather.warning, flights.warning, hotels.warning].filter((value): value is string => Boolean(value));
-  const sources = [weather.source, flights.source, ...hotels.sources].filter(
-    (value): value is { label: string; url: string } => Boolean(value),
-  );
+  const flights = await researchFlights(state.request);
   return {
-    research: {
-      weather: weather.weather,
-      airports: flights.airports,
-      airlines: flights.airlines,
-      hotelResearch: hotels.hotels,
-      warnings,
-      sources,
-    },
+    research: mergeResearch(
+      state.research,
+      { airports: flights.airports, airlines: flights.airlines },
+      flights.warning,
+      flights.source ? [flights.source] : [],
+    ),
   };
+}
+
+async function stayAgentNode(state: WorkflowStateType) {
+  if (process.env.TRAVEL_AGENT_DEMO_MODE === "true") return { research: state.research };
+  const hotels = await researchHotels(state.request);
+  return {
+    research: mergeResearch(
+      state.research,
+      { hotelResearch: hotels.hotels },
+      hotels.warning,
+      hotels.sources,
+    ),
+  };
+}
+
+async function weatherAgentNode(state: WorkflowStateType) {
+  if (process.env.TRAVEL_AGENT_DEMO_MODE === "true") return { research: state.research };
+  const weather = await researchWeather(state.request);
+  return {
+    research: mergeResearch(
+      state.research,
+      { weather: weather.weather },
+      weather.warning,
+      weather.source ? [weather.source] : [],
+    ),
+  };
+}
+
+function budgetAgentNode(state: WorkflowStateType) {
+  return { plan: buildPreviewPlan(state.request, state.research) };
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -409,8 +443,8 @@ Return JSON only with this shape:
   }
 }
 
-async function composeNode(state: WorkflowStateType) {
-  const fallback = buildPreviewPlan(state.request, state.research);
+async function itineraryAgentNode(state: WorkflowStateType) {
+  const fallback = state.plan ?? buildPreviewPlan(state.request, state.research);
   const livePlan = await composeWithGroq(state.request, state.research, fallback);
   if (livePlan) return { plan: livePlan };
   const reason = process.env.GROQ_API_KEY
@@ -425,17 +459,23 @@ function blockedNode(state: WorkflowStateType): never {
 
 const workflow = new StateGraph(WorkflowState)
   .addNode("supervisor", supervisorNode)
-  .addNode("research_agents", researchNode)
-  .addNode("compose", composeNode)
+  .addNode("flight_agent", flightAgentNode)
+  .addNode("stay_agent", stayAgentNode)
+  .addNode("weather_agent", weatherAgentNode)
+  .addNode("budget_agent", budgetAgentNode)
+  .addNode("itinerary_agent", itineraryAgentNode)
   .addNode("blocked", blockedNode)
   .addEdge(START, "supervisor")
   .addConditionalEdges(
     "supervisor",
-    (state) => state.guardrailError ? "blocked" : "research_agents",
-    { blocked: "blocked", research_agents: "research_agents" },
+    (state) => state.guardrailError ? "blocked" : "flight_agent",
+    { blocked: "blocked", flight_agent: "flight_agent" },
   )
-  .addEdge("research_agents", "compose")
-  .addEdge("compose", END)
+  .addEdge("flight_agent", "stay_agent")
+  .addEdge("stay_agent", "weather_agent")
+  .addEdge("weather_agent", "budget_agent")
+  .addEdge("budget_agent", "itinerary_agent")
+  .addEdge("itinerary_agent", END)
   .addEdge("blocked", END)
   .compile();
 

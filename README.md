@@ -16,6 +16,9 @@ A production-oriented, review-first travel planner consolidated from five LangGr
 - Budget allocation with a protected contingency reserve
 - Day-by-day itinerary synthesis through Groq
 - Human approval and feedback-driven revision
+- Hosted SQL persistence for approved plans with owner-scoped history, restore, and delete
+- Database constraints plus server-side snapshot validation before every approval save
+- Animated six-stage agent execution, interactive itinerary days, and responsive motion
 - Safe preview mode requiring no API key
 - PostgreSQL checkpointing for Python human-in-the-loop resume
 - Responsive web UI, Streamlit UI, Docker Compose, health checks, tests, and GitHub Actions CI
@@ -33,7 +36,7 @@ flowchart TD
     H -->|Approve| F[Final plan]
 ```
 
-The root edge runtime powers the live site. `python_backend/` preserves the Python + Streamlit + PostgreSQL + FastMCP implementation from the supplied tutorial series. Both follow the same feature and safety contract.
+The root edge runtime powers the live site and stores approved plans in a hosted D1 SQL database. `python_backend/` preserves the Python + Streamlit + PostgreSQL + FastMCP implementation from the supplied tutorial series. Both follow the same feature and safety contract.
 
 ## Quick start: hosted web runtime
 
@@ -106,7 +109,7 @@ Provider terms and quotas can change. Verify each dashboard before production us
 |---|---|
 | Web | React 19, Next.js 16, Vinext, TypeScript, `@langchain/langgraph`, `@langchain/core` |
 | Python | LangGraph, LangChain Core, LangChain Groq, LangChain MCP Adapters, FastMCP, Streamlit |
-| Persistence | PostgreSQL 16, `psycopg`, `langgraph-checkpoint-postgres` |
+| Persistence | Hosted D1 SQL for approved web plans; PostgreSQL 16, `psycopg`, and `langgraph-checkpoint-postgres` for Python workflow checkpoints |
 | External APIs | Groq, Tavily, AviationStack, OpenWeather, Open-Meteo |
 | Delivery | Docker Compose, GitHub Actions, Cloudflare-compatible worker build |
 
@@ -120,6 +123,9 @@ Exact JavaScript versions are locked in `package-lock.json`. Python uses bounded
 | `components/travel-planner.tsx` | Responsive planner, agent trace, budget, itinerary, review, and export UI |
 | `lib/workflow.ts` | Edge LangGraph supervisor, parallel provider research, guardrails, and Groq composition |
 | `lib/fallback-plan.ts` | Deterministic, key-free preview planner |
+| `lib/plan-validation.ts` | Cross-field validation required before a plan can enter the database |
+| `db/` | D1 schema and prepared-statement persistence helpers |
+| `drizzle/` | Generated, reviewed SQL migrations and schema metadata |
 | `python_backend/app/` | Python agents, graph, provider clients, and local FastMCP servers |
 | `python_backend/streamlit_app.py` | Python human-review interface |
 | `docker-compose.yml` | Python app + PostgreSQL deployment |
@@ -154,7 +160,15 @@ Send the prior `plan` object plus a `feedback` string. The entire request is rev
 
 ### `GET /api/health`
 
-Returns readiness, preview/live mode, and provider configuration booleans. It never returns credential values.
+Returns readiness, preview/live mode, provider configuration booleans, and database availability. It never returns credential values.
+
+### `GET /api/plans` and `POST /api/plans`
+
+Lists approved plans for the signed-in owner or validates and persists a newly approved plan. A save is rejected unless the request, six agent results, budget reconciliation, itinerary length, costs, URLs, and payload size all pass validation.
+
+### `GET /api/plans/:id` and `DELETE /api/plans/:id`
+
+Restores or deletes one owner-scoped approved plan. Every query uses prepared parameters and never trusts a client-supplied owner identifier.
 
 ## Deployment
 
