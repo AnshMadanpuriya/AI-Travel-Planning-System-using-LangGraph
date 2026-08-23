@@ -1,0 +1,167 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "074b0ddc-7631-45f6-ac72-bc0ba245b183",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "tables": {
+    "travel_plans": {
+      "name": "travel_plans",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_key": {
+          "name": "owner_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "origin": {
+          "name": "origin",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "destination": {
+          "name": "destination",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "start_date": {
+          "name": "start_date",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "end_date": {
+          "name": "end_date",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "travelers": {
+          "name": "travelers",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "budget": {
+          "name": "budget",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "currency": {
+          "name": "currency",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "mode": {
+          "name": "mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revision_count": {
+          "name": "revision_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "plan_json": {
+          "name": "plan_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "approved_at": {
+          "name": "approved_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP"
+        }
+      },
+      "indexes": {
+        "travel_plans_owner_updated_idx": {
+          "name": "travel_plans_owner_updated_idx",
+          "columns": [
+            "owner_key",
+            "updated_at"
+          ],
+          "isUnique": false
+        },
+        "travel_plans_owner_destination_idx": {
+          "name": "travel_plans_owner_destination_idx",
+          "columns": [
+            "owner_key",
+            "destination"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "travel_plans_travelers_check": {
+          "name": "travel_plans_travelers_check",
+          "value": "\"travel_plans\".\"travelers\" BETWEEN 1 AND 20"
+        },
+        "travel_plans_budget_check": {
+          "name": "travel_plans_budget_check",
+          "value": "\"travel_plans\".\"budget\" BETWEEN 100 AND 1000000000"
+        },
+        "travel_plans_currency_check": {
+          "name": "travel_plans_currency_check",
+          "value": "\"travel_plans\".\"currency\" IN ('INR', 'USD', 'EUR', 'GBP')"
+        },
+        "travel_plans_mode_check": {
+          "name": "travel_plans_mode_check",
+          "value": "\"travel_plans\".\"mode\" IN ('live', 'preview')"
+        },
+        "travel_plans_revision_count_check": {
+          "name": "travel_plans_revision_count_check",
+          "value": "\"travel_plans\".\"revision_count\" >= 0"
+        }
+      }
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {}
+  }
+}

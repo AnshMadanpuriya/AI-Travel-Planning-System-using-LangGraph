@@ -1,2 +1,2 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+# Do not render previously committed environment values in routine review diffs.
+.env -diff
