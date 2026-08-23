@@ -1,0 +1,32 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-travel_agent}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-development-only}
+      POSTGRES_DB: ${POSTGRES_DB:-travel_agent}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-travel_agent} -d ${POSTGRES_DB:-travel_agent}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  python-agent:
+    build: ./python_backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-travel_agent}:${POSTGRES_PASSWORD:-local-development-only}@postgres:5432/${POSTGRES_DB:-travel_agent}
+      TRAVEL_AGENT_DEMO_MODE: ${TRAVEL_AGENT_DEMO_MODE:-true}
+    ports:
+      - "8501:8501"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
