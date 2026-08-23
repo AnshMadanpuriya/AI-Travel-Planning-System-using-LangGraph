@@ -1,0 +1,2 @@
+# Do not render previously committed environment values in routine review diffs.
+.env -diff
