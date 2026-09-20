@@ -90,21 +90,24 @@ code .
 Windows PowerShell:
 
 ```powershell
-py -3.11 -m venv .venv
-.venv\Scripts\Activate.ps1
+py -3.13 -m venv .venv
+.\.venv\Scripts\Activate.ps1
 ```
+
+If Python 3.13 is not installed, use any available supported version from 3.11 onward, for example
+`py -3.11 -m venv .venv`. Run `py --list` to see installed versions.
 
 Windows Command Prompt:
 
 ```bat
-py -3.11 -m venv .venv
+py -3.13 -m venv .venv
 .venv\Scripts\activate.bat
 ```
 
 macOS/Linux:
 
 ```bash
-python3.11 -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 ```
 
@@ -112,7 +115,15 @@ source .venv/bin/activate
 
 ```bash
 python -m pip install --upgrade pip
-pip install -e ".[dev]"
+python -m pip install -e ".[dev]"
+```
+
+If pip reports that no Streamlit version is available, first pull the latest project changes and
+retry against the official Python Package Index:
+
+```powershell
+git pull origin main
+python -m pip install --index-url https://pypi.org/simple -e ".[dev]"
 ```
 
 ### 4. Add API keys
@@ -135,7 +146,7 @@ new one. Deleting `.env` in a later commit does not remove the old value from Gi
 ### 5. Start the app
 
 ```bash
-streamlit run frontend.py
+python -m streamlit run frontend.py
 ```
 
 Open the local URL shown in the terminal, normally `http://localhost:8501`.
