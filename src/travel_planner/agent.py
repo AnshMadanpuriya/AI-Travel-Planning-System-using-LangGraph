@@ -73,7 +73,7 @@ class PlannerResult:
 
 
 def _mcp_tool_to_schema(tool: Any) -> dict[str, Any]:
-    schema = getattr(tool, "inputSchema", None) or getattr(tool, "input_schema", None)
+    schema = getattr(tool, "input_schema", None) or getattr(tool, "inputSchema", None)
     if schema is None:
         schema = {"type": "object", "properties": {}}
     return {

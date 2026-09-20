@@ -16,6 +16,7 @@ travel plan with clear verification notes.
 - Current destination research through Tavily with source URLs.
 - Deterministic itinerary and budget tools for transparent calculations.
 - A responsive Streamlit interface with visible capability status and an MCP activity trace.
+- In-session plan persistence with contextual follow-up questions and complete-plan downloads.
 - No PostgreSQL installation required for the default local setup.
 - Secrets excluded from Git, plus automated syntax and unit checks in GitHub Actions.
 
@@ -38,6 +39,10 @@ The UI never calls travel providers directly. `src/travel_planner/agent.py` disc
 schemas from `mcp_server.py`, binds them to the Groq model, and uses LangGraph to repeat
 `agent → MCP tools → agent` until a final answer is ready.
 
+The Streamlit session retains the generated plan and recent conversation so users can ask
+follow-up questions without repeating the full trip brief. It does not write conversation data to
+a database.
+
 ## MCP tools
 
 | Tool | Purpose | Key required |
@@ -54,11 +59,13 @@ schemas from `mcp_server.py`, binds them to the Groq model, and uses LangGraph t
 ```text
 .
 ├── .github/workflows/ci.yml       # automated checks
+├── .streamlit/config.toml          # theme and privacy settings
 ├── .vscode/launch.json            # one-click VS Code run profiles
+├── examples/sample_queries.md      # ready-to-run prompts
 ├── src/travel_planner/
 │   ├── agent.py                    # LangGraph + MCP orchestration
 │   └── config.py                   # safe environment configuration
-├── tests/test_tools.py             # offline unit tests
+├── tests/                           # offline calculations and MCP contract tests
 ├── tools/                           # compatibility wrappers
 ├── frontend.py                     # Streamlit interface
 ├── main.py                         # CLI entry point
@@ -162,8 +169,11 @@ Run checks:
 ```bash
 python -m compileall -q .
 pytest -q
+ruff format --check .
 ruff check .
 ```
+
+Example requests are available in [`examples/sample_queries.md`](examples/sample_queries.md).
 
 ## Reliability and safety
 
@@ -172,6 +182,7 @@ ruff check .
 - Tool errors return structured messages so the agent can disclose missing verification.
 - User-generated answers are rendered as Markdown, not injected as unsafe HTML.
 - `.env`, generated plans, caches, and local environments are ignored by Git.
+- Streamlit usage telemetry is disabled in the checked-in configuration.
 
 ## License
 

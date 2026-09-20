@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import sys
 from datetime import date, timedelta
 from pathlib import Path
@@ -207,6 +208,51 @@ def build_query(
     )
 
 
+def destination_slug(destination: str) -> str:
+    """Create a safe, readable download filename component."""
+
+    slug = re.sub(r"[^a-z0-9]+", "-", destination.casefold()).strip("-")
+    return slug or "trip"
+
+
+def render_tool_trace(tool_trace: list[dict]) -> None:
+    if not tool_trace:
+        st.info("The agent answered without calling a tool.")
+        return
+    for index, item in enumerate(tool_trace, 1):
+        icon = "✓" if item["status"] == "success" else "!"
+        st.markdown(f"**{icon} {index}. `{item['tool']}` — {item['status']}**")
+        st.json(item["arguments"], expanded=False)
+
+
+def build_download(record: dict, follow_ups: list[dict]) -> str:
+    sections = [
+        "# VoyageGraph Travel Plan",
+        f"**Request:** {record['query']}",
+        "---",
+        record["answer"],
+    ]
+    if follow_ups:
+        sections.extend(["---", "## Follow-up planning"])
+        for item in follow_ups:
+            sections.extend([f"### {item['question']}", item["answer"]])
+    sections.extend(
+        [
+            "---",
+            "Generated with an MCP-powered AI agent. Verify prices and availability before booking.",
+        ]
+    )
+    return "\n\n".join(sections) + "\n"
+
+
+if "vg_plan" not in st.session_state:
+    st.session_state.vg_plan = None
+if "vg_history" not in st.session_state:
+    st.session_state.vg_history = []
+if "vg_follow_ups" not in st.session_state:
+    st.session_state.vg_follow_ups = []
+
+
 settings = Settings.from_env()
 with st.sidebar:
     st.markdown("## ✦ VoyageGraph")
@@ -261,7 +307,7 @@ with plan_tab:
             destination = st.text_input("To", value="Goa", placeholder="Destination city")
 
         date_left, date_right, traveler_col = st.columns([1, 1, 0.8])
-        default_departure = date.today() + timedelta(days=30)
+        default_departure = date.today() + timedelta(days=7)
         with date_left:
             departure = st.date_input("Departure", value=default_departure, min_value=date.today())
         with date_right:
@@ -312,8 +358,12 @@ with plan_tab:
     if submitted:
         if not origin.strip() or not destination.strip():
             st.error("Please enter both origin and destination.")
+        elif origin.strip().casefold() == destination.strip().casefold():
+            st.error("Origin and destination must be different.")
         elif return_date <= departure:
             st.error("Return date must be after the departure date.")
+        elif (return_date - departure).days + 1 > 30:
+            st.error("Please keep the trip within 30 days.")
         else:
             query = build_query(
                 origin,
@@ -333,43 +383,18 @@ with plan_tab:
                     result = plan_trip_sync(query)
                     status.update(label="Travel plan ready", state="complete", expanded=False)
 
-                tool_count = len(result.tool_trace)
-                success_count = sum(item["status"] == "success" for item in result.tool_trace)
-                m1, m2, m3 = st.columns(3)
-                m1.metric("MCP calls", tool_count)
-                m2.metric("Verified calls", success_count)
-                m3.metric("Trip length", f"{(return_date - departure).days + 1} days")
-
-                st.markdown(
-                    "<div class='section-title'>Your travel plan</div>", unsafe_allow_html=True
-                )
-                with st.container(border=False, key="answer_card"):
-                    st.markdown(result.answer)
-
-                download_text = (
-                    f"# VoyageGraph Travel Plan\n\n**Request:** {query}\n\n---\n\n{result.answer}\n\n"
-                    "---\nGenerated with an MCP-powered AI agent. Verify prices and availability before booking.\n"
-                )
-                left, right = st.columns([1, 2])
-                with left:
-                    st.download_button(
-                        "Download plan",
-                        data=download_text,
-                        file_name=f"voyagegraph-{destination.lower().replace(' ', '-')}.md",
-                        mime="text/markdown",
-                        use_container_width=True,
-                    )
-                with right:
-                    with st.expander("Inspect MCP tool activity"):
-                        if result.tool_trace:
-                            for index, item in enumerate(result.tool_trace, 1):
-                                icon = "✓" if item["status"] == "success" else "!"
-                                st.markdown(
-                                    f"**{icon} {index}. `{item['tool']}` — {item['status']}**"
-                                )
-                                st.json(item["arguments"], expanded=False)
-                        else:
-                            st.info("The agent answered without calling a tool.")
+                st.session_state.vg_plan = {
+                    "query": query,
+                    "answer": result.answer,
+                    "tool_trace": result.tool_trace,
+                    "destination": destination,
+                    "days": (return_date - departure).days + 1,
+                }
+                st.session_state.vg_history = [
+                    {"role": "user", "content": query},
+                    {"role": "assistant", "content": result.answer},
+                ]
+                st.session_state.vg_follow_ups = []
             except RuntimeError as error:
                 st.error(str(error))
                 st.info(
@@ -377,6 +402,87 @@ with plan_tab:
                 )
             except Exception as error:
                 st.error(f"The planner could not complete this request: {error}")
+
+    record = st.session_state.vg_plan
+    if record:
+        tool_count = len(record["tool_trace"])
+        success_count = sum(item["status"] == "success" for item in record["tool_trace"])
+        m1, m2, m3 = st.columns(3)
+        m1.metric("MCP calls", tool_count)
+        m2.metric("Verified calls", success_count)
+        m3.metric("Trip length", f"{record['days']} days")
+
+        st.markdown("<div class='section-title'>Your travel plan</div>", unsafe_allow_html=True)
+        with st.container(border=False, key="answer_card"):
+            st.markdown(record["answer"])
+
+        if st.session_state.vg_follow_ups:
+            st.markdown("#### Follow-up planning")
+            for item in st.session_state.vg_follow_ups:
+                with st.chat_message("user"):
+                    st.write(item["question"])
+                with st.chat_message("assistant"):
+                    st.markdown(item["answer"])
+                    with st.expander("Tools used for this follow-up"):
+                        render_tool_trace(item["tool_trace"])
+
+        download_text = build_download(record, st.session_state.vg_follow_ups)
+        action_left, action_middle, action_right = st.columns([1, 1, 2])
+        with action_left:
+            st.download_button(
+                "Download plan",
+                data=download_text,
+                file_name=f"voyagegraph-{destination_slug(record['destination'])}.md",
+                mime="text/markdown",
+                use_container_width=True,
+            )
+        with action_middle:
+            if st.button("Start new plan", use_container_width=True):
+                st.session_state.vg_plan = None
+                st.session_state.vg_history = []
+                st.session_state.vg_follow_ups = []
+                st.rerun()
+        with action_right:
+            with st.expander("Inspect initial MCP activity"):
+                render_tool_trace(record["tool_trace"])
+
+        st.markdown("#### Refine this plan")
+        st.caption("Ask about alternatives, budget changes, timings, or a less rushed itinerary.")
+        with st.form("follow_up_form", clear_on_submit=True):
+            follow_up = st.text_input(
+                "Follow-up question",
+                placeholder="Example: Replace day 3 with a quieter nature experience",
+                label_visibility="collapsed",
+            )
+            ask_follow_up = st.form_submit_button("Ask VoyageGraph", use_container_width=True)
+
+        if ask_follow_up:
+            if not follow_up.strip():
+                st.warning("Enter a follow-up question first.")
+            else:
+                try:
+                    with st.status("Updating your plan with MCP tools…", expanded=True) as status:
+                        follow_result = plan_trip_sync(
+                            follow_up,
+                            history=st.session_state.vg_history,
+                        )
+                        status.update(label="Plan updated", state="complete", expanded=False)
+                    st.session_state.vg_follow_ups.append(
+                        {
+                            "question": follow_up.strip(),
+                            "answer": follow_result.answer,
+                            "tool_trace": follow_result.tool_trace,
+                        }
+                    )
+                    st.session_state.vg_history.extend(
+                        [
+                            {"role": "user", "content": follow_up.strip()},
+                            {"role": "assistant", "content": follow_result.answer},
+                        ]
+                    )
+                    st.rerun()
+                except Exception as error:
+                    st.error(f"The follow-up could not be completed: {error}")
 
 with architecture_tab:
     st.markdown(
