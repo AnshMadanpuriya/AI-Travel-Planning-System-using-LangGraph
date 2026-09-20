@@ -1,0 +1,28 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Environments
+.venv/
+venv/
+
+# App output
+travel_plans/
+.streamlit/secrets.toml
+
+# Editors and OS
+.idea/
+.DS_Store
+Thumbs.db
+

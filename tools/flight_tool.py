@@ -1,61 +1,19 @@
+"""Compatibility wrapper around the MCP server's normalized flight search."""
 
-# Example free API usage
-# - AviationStack
-
-
-# create api key
-# https://aviationstack.com/ 
-# pip install requests
+from mcp_server import search_flights_data
 
 
-    
-import os
-import requests
-from dotenv import load_dotenv
-
-load_dotenv()
-
-API_KEY = os.getenv("AVIATIONSTACK_API_KEY")
-
-
-def search_flights(query):
-
-    url = "http://api.aviationstack.com/v1/flights"
-
-    params = {
-        "access_key": API_KEY,
-        "limit": 5
-    }
-
-    response = requests.get(url, params=params)
-
-    data = response.json()
-
-    flights = []
-
-    if "data" in data:
-
-        for flight in data["data"][:5]:
-
-            airline = flight.get("airline", {}).get("name", "Unknown")
-
-            departure = flight.get(
-                "departure", {}
-            ).get("airport", "Unknown")
-
-            arrival = flight.get(
-                "arrival", {}
-            ).get("airport", "Unknown")
-
-            status = flight.get("flight_status", "Unknown")
-
-            flights.append(
-                f"""
-Airline: {airline}
-Departure: {departure}
-Arrival: {arrival}
-Status: {status}
-"""
-            )
-
-    return "\n".join(flights)
+def search_flights(
+    origin: str,
+    destination: str,
+    departure_date: str,
+    adults: int = 1,
+    max_price_inr: int = 0,
+):
+    return search_flights_data(
+        origin=origin,
+        destination=destination,
+        departure_date=departure_date,
+        adults=adults,
+        max_price_inr=max_price_inr,
+    )
