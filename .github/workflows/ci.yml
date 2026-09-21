@@ -11,21 +11,27 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
-          python-version: "3.11"
-          cache: pip
+          version: "0.12.17"
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
       - name: Install project
-        run: pip install -e ".[dev]"
+        run: uv sync --locked --extra dev
       - name: Dependency check
-        run: pip check
+        run: uv pip check
       - name: Syntax check
-        run: python -m compileall -q main.py frontend.py mcp_server.py src tools tests
+        run: uv run --locked python -m compileall -q main.py frontend.py mcp_server.py src tools tests
       - name: Unit tests
-        run: pytest -q
+        run: uv run --locked pytest -q
       - name: Format check
-        run: ruff format --check .
+        run: uv run --locked ruff format --check .
       - name: Lint
-        run: ruff check .
+        run: uv run --locked ruff check .

@@ -85,45 +85,42 @@ cd AI-Travel-Planning-System-using-LangGraph
 code .
 ```
 
-### 2. Create a virtual environment
+### 2. Install uv
 
 Windows PowerShell:
 
 ```powershell
-py -3.13 -m venv .venv
-.\.venv\Scripts\Activate.ps1
+winget install --id astral-sh.uv -e
 ```
 
-If Python 3.13 is not installed, use any available supported version from 3.11 onward, for example
-`py -3.11 -m venv .venv`. Run `py --list` to see installed versions.
-
-Windows Command Prompt:
-
-```bat
-py -3.13 -m venv .venv
-.venv\Scripts\activate.bat
-```
-
-macOS/Linux:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-```
-
-### 3. Install packages
-
-```bash
-python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
-```
-
-If pip reports that no Streamlit version is available, first pull the latest project changes and
-retry against the official Python Package Index:
+Close and reopen the terminal if `uv` is not recognized after installation. Confirm it with:
 
 ```powershell
-git pull origin main
-python -m pip install --index-url https://pypi.org/simple -e ".[dev]"
+uv --version
+```
+
+macOS/Linux and alternative installation methods are documented in the
+[official uv installation guide](https://docs.astral.sh/uv/getting-started/installation/).
+
+### 3. Create the locked project environment
+
+```bash
+uv sync --locked
+```
+
+`uv` reads `.python-version`, creates `.venv`, installs Python 3.13 when necessary, and installs the
+exact dependency versions recorded in `uv.lock`. You do not need to activate `.venv` or run pip.
+
+To include test and lint tools while developing:
+
+```bash
+uv sync --locked --extra dev
+```
+
+Windows users can instead use the included launcher, which performs the sync and starts the app:
+
+```powershell
+.\run_windows.cmd
 ```
 
 ### 4. Add API keys
@@ -146,10 +143,13 @@ new one. Deleting `.env` in a later commit does not remove the old value from Gi
 ### 5. Start the app
 
 ```bash
-python -m streamlit run frontend.py
+uv run --locked streamlit run frontend.py
 ```
 
 Open the local URL shown in the terminal, normally `http://localhost:8501`.
+
+Always start VoyageGraph with `uv run` or `.\run_windows.cmd`. If a traceback mentions a global
+path such as `Python310\Lib\site-packages`, the app was started with the wrong Python interpreter.
 
 You can also open VS Code's **Run and Debug** panel and choose
 **VoyageGraph: Streamlit UI**. The MCP server starts automatically as a local stdio subprocess
@@ -160,28 +160,28 @@ when the agent handles a request; you do not need a second terminal.
 Interactive CLI:
 
 ```bash
-python main.py
+uv run --locked python main.py
 ```
 
 Single request:
 
 ```bash
-python main.py "Plan a 5-day trip from Indore to Goa next month for two people"
+uv run --locked python main.py "Plan a 5-day trip from Indore to Goa next month for two people"
 ```
 
 Run the MCP server directly for inspection:
 
 ```bash
-python mcp_server.py
+uv run --locked python mcp_server.py
 ```
 
 Run checks:
 
 ```bash
-python -m compileall -q .
-pytest -q
-ruff format --check .
-ruff check .
+uv run --locked python -m compileall -q .
+uv run --locked pytest -q
+uv run --locked ruff format --check .
+uv run --locked ruff check .
 ```
 
 Example requests are available in [`examples/sample_queries.md`](examples/sample_queries.md).
