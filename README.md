@@ -10,7 +10,7 @@ travel plan with clear verification notes.
 ## What makes this project different
 
 - Real MCP client/server integration instead of direct Python tool imports in the agent.
-- A LangGraph ReAct loop that chooses tools dynamically and can recover from API failures.
+- A bounded LangGraph workflow that selects tools dynamically and preserves partial results on failure.
 - Live Google Flights and Google Hotels snapshots through SerpApi.
 - Current weather and forecasts through Open-Meteo, with no weather key required.
 - Current destination research through Tavily with source URLs.
@@ -36,8 +36,8 @@ flowchart TD
 ```
 
 The UI never calls travel providers directly. `src/travel_planner/agent.py` discovers the tool
-schemas from `mcp_server.py`, binds them to the Groq model, and uses LangGraph to repeat
-`agent → MCP tools → agent` until a final answer is ready.
+schemas from `mcp_server.py`, binds them to the Groq model, and runs
+`select tools → parallel MCP searches → final answer`. A normal plan uses two model requests.
 
 The Streamlit session retains the generated plan and recent conversation so users can ask
 follow-up questions without repeating the full trip brief. It does not write conversation data to
@@ -188,6 +188,17 @@ Example requests are available in [`examples/sample_queries.md`](examples/sample
 
 ## Reliability and safety
 
+- A 55-second planning budget includes MCP startup; individual model calls are limited to 18 seconds.
+  Searches run together for up to 20 seconds, reserving time for the final answer. Slow services can
+  produce clearly marked partial results; a complete, verified plan within one minute is not guaranteed.
+- Output tokens, recent conversation history, and model-facing search evidence are bounded to suit
+  Groq's 8,000-token/minute tier. Original tool results remain available in the MCP activity trace.
+  Actual first-call usage informs the final payload size; token estimates are conservative heuristics.
+- HTTP 413 triggers one smaller request. HTTP 429 stops promptly with any completed results retained;
+  other apps sharing your Groq organization can still exhaust its token allowance.
+- Existing `.env` files work with the new defaults. `MAX_AGENT_STEPS` is retired. Optional controls:
+  `PLANNER_TIMEOUT_SECONDS=55` (maximum 55), `GROQ_MAX_OUTPUT_TOKENS=1536` (maximum 1536), and
+  `GROQ_TPM_BUDGET=8000` (set this to your account's allowance; it does not increase provider limits).
 - Flight and hotel data are search-time snapshots, never booking guarantees.
 - The system prompt forbids invented fares, schedules, ratings, policies, and availability.
 - Tool errors return structured messages so the agent can disclose missing verification.

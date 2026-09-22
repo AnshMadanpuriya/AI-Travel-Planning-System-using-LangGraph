@@ -223,6 +223,8 @@ def render_tool_trace(tool_trace: list[dict]) -> None:
         icon = "✓" if item["status"] == "success" else "!"
         st.markdown(f"**{icon} {index}. `{item['tool']}` — {item['status']}**")
         st.json(item["arguments"], expanded=False)
+        if "result" in item:
+            st.json(item["result"], expanded=False)
 
 
 def build_download(record: dict, follow_ups: list[dict]) -> str:
@@ -380,8 +382,15 @@ with plan_tab:
                 with st.status("VoyageGraph is coordinating MCP tools…", expanded=True) as status:
                     st.write("Reading the trip brief")
                     st.write("Discovering available MCP tools")
+                    st.write("Checking sources together; planning budget is about 55 seconds.")
                     result = plan_trip_sync(query)
-                    status.update(label="Travel plan ready", state="complete", expanded=False)
+                    status.update(
+                        label="Partial results available"
+                        if result.partial
+                        else "Travel plan ready",
+                        state="complete",
+                        expanded=False,
+                    )
 
                 st.session_state.vg_plan = {
                     "query": query,
@@ -389,6 +398,8 @@ with plan_tab:
                     "tool_trace": result.tool_trace,
                     "destination": destination,
                     "days": (return_date - departure).days + 1,
+                    "partial": result.partial,
+                    "elapsed_seconds": result.elapsed_seconds,
                 }
                 st.session_state.vg_history = [
                     {"role": "user", "content": query},
@@ -405,11 +416,16 @@ with plan_tab:
 
     record = st.session_state.vg_plan
     if record:
+        st.caption(f"Planning completed in {record.get('elapsed_seconds', 0):.1f} seconds.")
+        if record.get("partial"):
+            st.warning(
+                "Some checks could not be completed. Review the missing checks before using this plan."
+            )
         tool_count = len(record["tool_trace"])
         success_count = sum(item["status"] == "success" for item in record["tool_trace"])
         m1, m2, m3 = st.columns(3)
         m1.metric("MCP calls", tool_count)
-        m2.metric("Verified calls", success_count)
+        m2.metric("Completed calls", success_count)
         m3.metric("Trip length", f"{record['days']} days")
 
         st.markdown("<div class='section-title'>Your travel plan</div>", unsafe_allow_html=True)
@@ -422,6 +438,8 @@ with plan_tab:
                 with st.chat_message("user"):
                     st.write(item["question"])
                 with st.chat_message("assistant"):
+                    if item.get("partial"):
+                        st.warning("This update has incomplete checks.")
                     st.markdown(item["answer"])
                     with st.expander("Tools used for this follow-up"):
                         render_tool_trace(item["tool_trace"])
@@ -466,12 +484,19 @@ with plan_tab:
                             follow_up,
                             history=st.session_state.vg_history,
                         )
-                        status.update(label="Plan updated", state="complete", expanded=False)
+                        status.update(
+                            label="Partial update available"
+                            if follow_result.partial
+                            else "Plan updated",
+                            state="complete",
+                            expanded=False,
+                        )
                     st.session_state.vg_follow_ups.append(
                         {
                             "question": follow_up.strip(),
                             "answer": follow_result.answer,
                             "tool_trace": follow_result.tool_trace,
+                            "partial": follow_result.partial,
                         }
                     )
                     st.session_state.vg_history.extend(

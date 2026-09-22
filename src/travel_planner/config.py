@@ -29,8 +29,10 @@ class Settings:
     serpapi_api_key: str | None
     tavily_api_key: str | None
     request_timeout_seconds: int
-    max_agent_steps: int
     mcp_server_path: Path
+    planner_timeout_seconds: int = 55
+    groq_max_output_tokens: int = 1536
+    groq_tpm_budget: int = 8000
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -40,8 +42,10 @@ class Settings:
             serpapi_api_key=os.getenv("SERPAPI_API_KEY"),
             tavily_api_key=os.getenv("TAVILY_API_KEY"),
             request_timeout_seconds=_positive_int("REQUEST_TIMEOUT_SECONDS", 30),
-            max_agent_steps=_positive_int("MAX_AGENT_STEPS", 8),
             mcp_server_path=PROJECT_ROOT / "mcp_server.py",
+            planner_timeout_seconds=min(_positive_int("PLANNER_TIMEOUT_SECONDS", 55), 55),
+            groq_max_output_tokens=min(_positive_int("GROQ_MAX_OUTPUT_TOKENS", 1536), 1536),
+            groq_tpm_budget=_positive_int("GROQ_TPM_BUDGET", 8000),
         )
 
     def require_agent_key(self) -> None:
