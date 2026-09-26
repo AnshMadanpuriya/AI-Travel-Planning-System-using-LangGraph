@@ -188,6 +188,12 @@ Example requests are available in [`examples/sample_queries.md`](examples/sample
 
 ## Reliability and safety
 
+- Streamlit supervises planning in a separate process with live stage updates and an elapsed timer.
+  The 55-second watchdog runs outside the agent's event loop, so stuck MCP startup, cancellation,
+  or shutdown cannot leave the UI waiting indefinitely. It stops only that request's process tree
+  and preserves completed search results. Process cleanup can add a few seconds.
+- MCP uses the same Python interpreter as the app, a 12-second initialization timeout, explicit
+  request timeouts, and `keep_alive=False`. Answers are delivered before connection cleanup.
 - A 55-second planning budget includes MCP startup; individual model calls are limited to 18 seconds.
   Searches run together for up to 20 seconds, reserving time for the final answer. Slow services can
   produce clearly marked partial results; a complete, verified plan within one minute is not guaranteed.
@@ -200,6 +206,9 @@ Example requests are available in [`examples/sample_queries.md`](examples/sample
   `PLANNER_TIMEOUT_SECONDS=55` (maximum 55), `GROQ_MAX_OUTPUT_TOKENS=1536` (maximum 1536), and
   `GROQ_TPM_BUDGET=8000` (set this to your account's allowance; it does not increase provider limits).
 - Flight and hotel data are search-time snapshots, never booking guarantees.
+- If the app only shows the old fixed "Reading the trip brief / Discovering available MCP tools"
+  lines, stop Streamlit with Ctrl+C, run `git pull --ff-only origin main`, and restart with
+  `uv run --locked streamlit run frontend.py`. The updated sidebar says "Live progress enabled".
 - The system prompt forbids invented fares, schedules, ratings, policies, and availability.
 - Tool errors return structured messages so the agent can disclose missing verification.
 - User-generated answers are rendered as Markdown, not injected as unsafe HTML.
