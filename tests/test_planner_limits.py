@@ -64,7 +64,7 @@ def install_fakes(monkeypatch, responses, *, tool_handler=None, timeout=55):
             return outcome
 
     class FakeClient:
-        def __init__(self, path):
+        def __init__(self, path, **kwargs):
             pass
 
         async def __aenter__(self):
@@ -198,7 +198,7 @@ def test_deadline_includes_mcp_startup(monkeypatch):
     install_fakes(monkeypatch, [], timeout=0.05)
 
     class HangingClient:
-        def __init__(self, path):
+        def __init__(self, path, **kwargs):
             pass
 
         async def __aenter__(self):

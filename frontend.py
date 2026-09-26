@@ -215,6 +215,23 @@ def destination_slug(destination: str) -> str:
     return slug or "trip"
 
 
+def run_with_progress(query: str, history: list[dict] | None = None):
+    with st.status("Preparing your travel plan…", expanded=True) as status:
+        timer = st.empty()
+
+        def update(event: dict) -> None:
+            status.update(label=event["stage"])
+            timer.caption(f"{event['elapsed_seconds']:.0f}s elapsed · stops waiting at 55s")
+
+        result = plan_trip_sync(query, history=history, on_progress=update)
+        status.update(
+            label="Partial results available" if result.partial else "Travel plan ready",
+            state="complete",
+            expanded=False,
+        )
+    return result
+
+
 def render_tool_trace(tool_trace: list[dict]) -> None:
     if not tool_trace:
         st.info("The agent answered without calling a tool.")
@@ -259,6 +276,7 @@ settings = Settings.from_env()
 with st.sidebar:
     st.markdown("## ✦ VoyageGraph")
     st.caption("MCP-powered travel intelligence")
+    st.caption("Live progress enabled · 55-second planning limit")
     st.markdown("---")
     st.markdown("### Service readiness")
     for label, ready in settings.capability_status().items():
@@ -379,18 +397,7 @@ with plan_tab:
                 notes,
             )
             try:
-                with st.status("VoyageGraph is coordinating MCP tools…", expanded=True) as status:
-                    st.write("Reading the trip brief")
-                    st.write("Discovering available MCP tools")
-                    st.write("Checking sources together; planning budget is about 55 seconds.")
-                    result = plan_trip_sync(query)
-                    status.update(
-                        label="Partial results available"
-                        if result.partial
-                        else "Travel plan ready",
-                        state="complete",
-                        expanded=False,
-                    )
+                result = run_with_progress(query)
 
                 st.session_state.vg_plan = {
                     "query": query,
@@ -479,18 +486,9 @@ with plan_tab:
                 st.warning("Enter a follow-up question first.")
             else:
                 try:
-                    with st.status("Updating your plan with MCP tools…", expanded=True) as status:
-                        follow_result = plan_trip_sync(
-                            follow_up,
-                            history=st.session_state.vg_history,
-                        )
-                        status.update(
-                            label="Partial update available"
-                            if follow_result.partial
-                            else "Plan updated",
-                            state="complete",
-                            expanded=False,
-                        )
+                    follow_result = run_with_progress(
+                        follow_up, history=st.session_state.vg_history
+                    )
                     st.session_state.vg_follow_ups.append(
                         {
                             "question": follow_up.strip(),

@@ -4,18 +4,20 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 import time
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Sequence
 from datetime import date
 from typing import Any, Literal, TypedDict
 
 from fastmcp import Client
+from fastmcp.client.transports import PythonStdioTransport
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 from langgraph.graph import END, START, StateGraph
 
 from .config import Settings
+from .models import PlannerResult
 from .payloads import byte_size, clip_text, compact_result, compact_schema, encode, partial_answer
 
 SYSTEM_PROMPT = """You are VoyageGraph. Today is {today}.
@@ -40,15 +42,6 @@ class PlannerState(TypedDict, total=False):
     response: AIMessage
     answer: str
     partial: bool
-
-
-@dataclass(frozen=True)
-class PlannerResult:
-    answer: str
-    tool_trace: list[dict[str, Any]]
-    available_tools: list[str]
-    partial: bool = False
-    elapsed_seconds: float = 0.0
 
 
 def _mcp_tool_to_schema(tool: Any) -> dict[str, Any]:
@@ -131,7 +124,12 @@ def _failure_reason(error: Exception) -> str:
     return "The AI provider could not finish this request. Completed searches are retained below."
 
 
-async def plan_trip(query: str, history: Sequence[dict[str, str]] | None = None) -> PlannerResult:
+async def plan_trip(
+    query: str,
+    history: Sequence[dict[str, str]] | None = None,
+    *,
+    on_progress: Callable[[dict[str, Any]], None] | None = None,
+) -> PlannerResult:
     """Use two normal model requests and a 55-second work budget, including MCP startup."""
     clean_query = query.strip()
     if not clean_query:
@@ -148,6 +146,22 @@ async def plan_trip(query: str, history: Sequence[dict[str, str]] | None = None)
     available_tools: list[str] = []
     used_tokens = 0
     result: PlannerState = {}
+
+    def report(stage: str, **data: Any) -> None:
+        if on_progress:
+            on_progress({"stage": stage, **data})
+
+    def publish_answer(answer: str, partial: bool = False) -> None:
+        report(
+            "Travel results ready",
+            result={
+                "answer": answer,
+                "tool_trace": trace,
+                "available_tools": available_tools,
+                "partial": partial,
+            },
+        )
+
     base_messages: list[AnyMessage] = [
         SystemMessage(content=SYSTEM_PROMPT.format(today=date.today().isoformat())),
         *_history_messages(history),
@@ -180,6 +194,7 @@ async def plan_trip(query: str, history: Sequence[dict[str, str]] | None = None)
             except Exception as error:
                 if attempt or getattr(error, "status_code", None) != 413:
                     raise
+                report("Reducing the request to fit Groq's token allowance")
                 # Keep the full brief; remove history and compact only search evidence.
                 messages = [messages[0], HumanMessage(content=clean_query)]
                 if trace:
@@ -203,19 +218,39 @@ async def plan_trip(query: str, history: Sequence[dict[str, str]] | None = None)
 
     try:
         async with asyncio.timeout(settings.planner_timeout_seconds):
-            async with Client(settings.mcp_server_path) as mcp_client:
+            report("Starting the local MCP server")
+            transport = PythonStdioTransport(
+                settings.mcp_server_path,
+                python_cmd=sys.executable,
+                cwd=str(settings.mcp_server_path.parent),
+                keep_alive=False,
+                env={
+                    "SERPAPI_API_KEY": settings.serpapi_api_key or "",
+                    "TAVILY_API_KEY": settings.tavily_api_key or "",
+                    "REQUEST_TIMEOUT_SECONDS": str(settings.request_timeout_seconds),
+                },
+            )
+            async with Client(transport, init_timeout=12, timeout=20) as mcp_client:
+                report("Discovering travel tools")
                 mcp_tools = await mcp_client.list_tools()
                 schemas = [_mcp_tool_to_schema(tool) for tool in mcp_tools]
                 available_tools = [tool.name for tool in mcp_tools]
+                report(
+                    f"Connected to {len(available_tools)} travel tools",
+                    available_tools=available_tools,
+                )
                 tool_llm = llm.bind_tools(schemas, parallel_tool_calls=True)
 
                 async def agent_node(state: PlannerState) -> PlannerState:
+                    report("Asking Groq to select the travel searches")
                     messages = base_messages
                     if _estimated_tokens(messages, schemas) + 1024 > settings.groq_tpm_budget - 500:
                         messages = [base_messages[0], base_messages[-1]]
                     response = await invoke(
                         tool_llm, messages, min(1024, settings.groq_max_output_tokens)
                     )
+                    if not response.tool_calls and _message_text(response):
+                        publish_answer(_message_text(response))
                     return {"response": response, "answer": _message_text(response)}
 
                 async def tool_node(state: PlannerState) -> PlannerState:
@@ -225,6 +260,7 @@ async def plan_trip(query: str, history: Sequence[dict[str, str]] | None = None)
 
                     async def run(call: dict[str, Any]) -> Any:
                         name, arguments = call["name"], call.get("args", {})
+                        report("Checking " + name.replace("_", " "))
                         item: dict[str, Any] = {
                             "tool": name,
                             "arguments": arguments,
@@ -254,6 +290,11 @@ async def plan_trip(query: str, history: Sequence[dict[str, str]] | None = None)
                             }
                         item["result"] = data
                         trace.append(item)
+                        report(
+                            ("Completed " if item["status"] == "success" else "Could not complete ")
+                            + name.replace("_", " "),
+                            tool_result=item,
+                        )
                         return data
 
                     for call in calls:
@@ -277,6 +318,7 @@ async def plan_trip(query: str, history: Sequence[dict[str, str]] | None = None)
                     return {"partial": any(item["status"] != "success" for item in trace)}
 
                 async def finalizer_node(state: PlannerState) -> PlannerState:
+                    report("Writing your plan from the collected results")
                     output_tokens = settings.groq_max_output_tokens
                     # Avoid resending schemas, reasoning, and tool-call JSON to the final writer.
                     messages = list(base_messages)
@@ -322,6 +364,7 @@ async def plan_trip(query: str, history: Sequence[dict[str, str]] | None = None)
                     text = _message_text(response)
                     if not text:
                         raise ValueError("The model returned no final answer.")
+                    publish_answer(text, state.get("partial", False))
                     return {"answer": text}
 
                 def route(state: PlannerState) -> Literal["tools", "end"]:
@@ -336,6 +379,8 @@ async def plan_trip(query: str, history: Sequence[dict[str, str]] | None = None)
                 workflow.add_edge("tools", "finalize")
                 workflow.add_edge("finalize", END)
                 result = await workflow.compile().ainvoke({})
+                if result.get("answer"):
+                    publish_answer(result["answer"], result.get("partial", False))
     except Exception as error:
         result = {"answer": partial_answer(_failure_reason(error), trace), "partial": True}
 
@@ -348,6 +393,10 @@ async def plan_trip(query: str, history: Sequence[dict[str, str]] | None = None)
     )
 
 
-def plan_trip_sync(query: str, history: Sequence[dict[str, str]] | None = None) -> PlannerResult:
-    """Synchronous wrapper used by Streamlit and the CLI."""
-    return asyncio.run(plan_trip(query=query, history=history))
+def plan_trip_sync(
+    query: str, history: Sequence[dict[str, str]] | None = None, **kwargs: Any
+) -> PlannerResult:
+    """Compatibility entry point; use the independently timed worker."""
+    from .runner import plan_trip_sync as run
+
+    return run(query=query, history=history, **kwargs)
