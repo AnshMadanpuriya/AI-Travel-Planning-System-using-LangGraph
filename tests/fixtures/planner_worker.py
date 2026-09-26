@@ -75,7 +75,11 @@ def main():
                                 "type": "tool_call",
                             }
                         ],
-                        usage_metadata={"input_tokens": 500, "output_tokens": 200, "total_tokens": 700},
+                        usage_metadata={
+                            "input_tokens": 500,
+                            "output_tokens": 200,
+                            "total_tokens": 700,
+                        },
                     )
                 assert "15000" in messages[-1].content
                 return AIMessage(

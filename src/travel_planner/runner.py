@@ -197,7 +197,9 @@ def plan_trip_sync(
     if not query.strip():
         raise ValueError("Please describe the trip you want to plan.")
     if len(query.encode("utf-8")) > 3000:
-        raise ValueError("Please shorten the trip brief, keeping the cities, dates and constraints.")
+        raise ValueError(
+            "Please shorten the trip brief, keeping the cities, dates and constraints."
+        )
     settings = Settings.from_env()
     settings.require_agent_key()
     items = list(history or [])

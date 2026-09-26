@@ -486,7 +486,9 @@ with plan_tab:
                 st.warning("Enter a follow-up question first.")
             else:
                 try:
-                    follow_result = run_with_progress(follow_up, history=st.session_state.vg_history)
+                    follow_result = run_with_progress(
+                        follow_up, history=st.session_state.vg_history
+                    )
                     st.session_state.vg_follow_ups.append(
                         {
                             "question": follow_up.strip(),

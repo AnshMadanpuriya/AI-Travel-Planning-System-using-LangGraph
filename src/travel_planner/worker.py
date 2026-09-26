@@ -23,10 +23,14 @@ def main() -> None:
         emit({"result": asdict(result)})
     except (RuntimeError, ValueError):
         emit(
-            {"error": "The planner could not start. Check your API configuration and restart with uv run."}
+            {
+                "error": "The planner could not start. Check your API configuration and restart with uv run."
+            }
         )
     except Exception:
-        emit({"error": "The planner process could not finish. Completed checks have been retained."})
+        emit(
+            {"error": "The planner process could not finish. Completed checks have been retained."}
+        )
 
 
 if __name__ == "__main__":

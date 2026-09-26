@@ -32,9 +32,7 @@ def test_watchdog_returns_partial_results_and_stops_child_process(tmp_path):
 
 def test_answer_does_not_wait_for_worker_shutdown():
     started = time.monotonic()
-    result = _run_worker(
-        [sys.executable, "-u", FIXTURE, "answer_then_hang"], {"query": "Goa"}, 10
-    )
+    result = _run_worker([sys.executable, "-u", FIXTURE, "answer_then_hang"], {"query": "Goa"}, 10)
     assert result.answer == "Completed plan" and not result.partial
     assert time.monotonic() - started < 5
 
